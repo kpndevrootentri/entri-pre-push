@@ -1,0 +1,63 @@
+#!/bin/sh
+
+# ─── Config ───────────────────────────────────────────────────
+# Set which branches require a build check (space-separated)
+# Supports regex patterns (e.g., alpha-[0-9]+ matches alpha-1, alpha-2, etc.)
+BUILD_BRANCHES="${BUILD_BRANCHES:-dev}"
+BUILD_BRANCH_PATTERNS="${BUILD_BRANCH_PATTERNS:-alpha-[0-9]+}"
+# Set build command (defaults to npm run build)
+BUILD_CMD="${BUILD_CMD:-npm run build}"
+# ──────────────────────────────────────────────────────────────
+
+BRANCH_NAME=$(git symbolic-ref --short HEAD 2>/dev/null)
+
+# Skip build with: git push -o skip
+if [ "$GIT_PUSH_OPTION_0" = "skip" ]; then
+  echo "⏭  Skipping build check..."
+  exit 0
+fi
+
+# Check if current branch needs a build check
+NEEDS_BUILD=false
+
+# Exact match check
+for branch in $BUILD_BRANCHES; do
+  if [ "$BRANCH_NAME" = "$branch" ]; then
+    NEEDS_BUILD=true
+    break
+  fi
+done
+
+# Regex pattern match check
+if [ "$NEEDS_BUILD" = false ]; then
+  for pattern in $BUILD_BRANCH_PATTERNS; do
+    if echo "$BRANCH_NAME" | grep -qE "^${pattern}$"; then
+      NEEDS_BUILD=true
+      break
+    fi
+  done
+fi
+
+if [ "$NEEDS_BUILD" = true ]; then
+  echo "🔨 Pre-push: Running build check for branch '$BRANCH_NAME'..."
+  echo ""
+
+  $BUILD_CMD
+  BUILD_RESULT=$?
+
+  if [ $BUILD_RESULT -ne 0 ]; then
+    echo ""
+    echo "-----------------------------------------------------------"
+    echo "❌ Build failed. Push to '$BRANCH_NAME' has been blocked."
+    echo "   Fix the build errors above and try again."
+    echo "   To skip: git push -o skip"
+    echo "-----------------------------------------------------------"
+    exit 1
+  fi
+
+  echo ""
+  echo "✅ Build succeeded. Pushing..."
+  exit 0
+fi
+
+exit 0
