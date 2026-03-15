@@ -1,0 +1,6 @@
+{
+  "buildBranches": ["dev", "staging", "main"],
+  "buildBranchPatterns": ["alpha-[0-9]+", "beta-[0-9]+", "release-.*"],
+  "buildCmd": "npm run build",
+  "skipBuildIfUnchanged": ["src/", "package.json", "tsconfig.json"]
+}

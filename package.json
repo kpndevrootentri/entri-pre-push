@@ -15,7 +15,8 @@
   },
   "files": [
     "bin/",
-    "hooks/"
+    "hooks/",
+    ".githooksrc.example.json"
   ],
   "keywords": [
     "git",

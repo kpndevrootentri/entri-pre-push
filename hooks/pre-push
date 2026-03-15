@@ -1,20 +1,62 @@
 #!/bin/sh
 
-# ─── Config ───────────────────────────────────────────────────
-# Set which branches require a build check (space-separated)
-# Supports regex patterns (e.g., alpha-[0-9]+ matches alpha-1, alpha-2, etc.)
+# ─── Load .githooksrc.json if present ─────────────────────────
+REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
+CONFIG_FILE="${REPO_ROOT}/.githooksrc.json"
+
+if [ -f "$CONFIG_FILE" ] && command -v node >/dev/null 2>&1; then
+  _cfg() { node -e "try{var c=require('$CONFIG_FILE');process.stdout.write(String(c.$1||''))}catch(e){}" 2>/dev/null; }
+  _cfg_arr() { node -e "try{var c=require('$CONFIG_FILE');var v=c.$1;if(Array.isArray(v))process.stdout.write(v.join(' '))}catch(e){}" 2>/dev/null; }
+
+  _BRANCHES=$(_cfg_arr buildBranches)
+  _PATTERNS=$(_cfg_arr buildBranchPatterns)
+  _CMD=$(_cfg buildCmd)
+  _SKIP_UNCHANGED=$(_cfg_arr skipBuildIfUnchanged)
+
+  [ -n "$_BRANCHES" ]        && BUILD_BRANCHES="${BUILD_BRANCHES:-$_BRANCHES}"
+  [ -n "$_PATTERNS" ]        && BUILD_BRANCH_PATTERNS="${BUILD_BRANCH_PATTERNS:-$_PATTERNS}"
+  [ -n "$_CMD" ]             && BUILD_CMD="${BUILD_CMD:-$_CMD}"
+  [ -n "$_SKIP_UNCHANGED" ]  && SKIP_BUILD_IF_UNCHANGED="${SKIP_BUILD_IF_UNCHANGED:-$_SKIP_UNCHANGED}"
+fi
+
+# ─── Config (env vars override .githooksrc.json and defaults) ──
 BUILD_BRANCHES="${BUILD_BRANCHES:-dev}"
 BUILD_BRANCH_PATTERNS="${BUILD_BRANCH_PATTERNS:-alpha-[0-9]+}"
-# Set build command (defaults to npm run build)
 BUILD_CMD="${BUILD_CMD:-npm run build}"
 # ──────────────────────────────────────────────────────────────
 
 BRANCH_NAME=$(git symbolic-ref --short HEAD 2>/dev/null)
 
+# Handle detached HEAD state
+if [ -z "$BRANCH_NAME" ]; then
+  echo "⚠️  Pre-push: Detached HEAD state detected, skipping build check."
+  exit 0
+fi
+
 # Skip build with: SKIP_BUILD=1 git push
 if [ "$SKIP_BUILD" = "1" ]; then
   echo "⏭  Skipping build check..."
   exit 0
+fi
+
+# Smart skip: only run build if watched paths have changed
+# Usage: SKIP_BUILD_IF_UNCHANGED="src/ package.json" git push
+if [ -n "$SKIP_BUILD_IF_UNCHANGED" ]; then
+  REMOTE=$(git rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null)
+  if [ -n "$REMOTE" ]; then
+    CHANGED_FILES=$(git diff --name-only "$REMOTE" HEAD 2>/dev/null)
+    HAS_RELEVANT_CHANGE=false
+    for watch_path in $SKIP_BUILD_IF_UNCHANGED; do
+      if echo "$CHANGED_FILES" | grep -qE "^${watch_path}"; then
+        HAS_RELEVANT_CHANGE=true
+        break
+      fi
+    done
+    if [ "$HAS_RELEVANT_CHANGE" = false ]; then
+      echo "⏭  Pre-push: No changes in watched paths ($SKIP_BUILD_IF_UNCHANGED), skipping build."
+      exit 0
+    fi
+  fi
 fi
 
 # Check if current branch needs a build check
